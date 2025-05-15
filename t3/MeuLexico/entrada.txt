@@ -1,30 +1,17 @@
-{ determinar, dados os comprimentos dos lados de um triângulo, se o triângulo pode ser formado (se existe) e qual o tipo dele (equilátero, isósceles ou escaleno) }
+{ leitura de nome e idade com escrita de mensagem usando estes dados }
 
 algoritmo
 	declare
-		lado1, lado2, lado3: real
+		nome: literal
 	declare
-		classificacao: literal
+		idade: inteir
 
-	{ leitura dos comprimentos dos lados }
-	leia(lado1, lado2, lado3)
+	{ leitura de nome e idade do teclado }
+	leia(nome)
+	leia(idades)
 
-	se lado1 >= lado2 + lado3 ou lado2 >= lado1 + lado3 ou lado3 >= lado1 + lado2 { existe? } entao		
-		escreva("Os lados fornecidos nao formam um triangulo")
-	senao
-		se lado1 = lado2 e lado2 = lado3 entao { lados iguais? }
-			classificacao <- "Equilatero"
-		senao
-			se lado1 = lado2 ou lado1 = lado3 ou lado2 = lado3 entao { isosceles? }
-				classificacao <- "Isosceles"
-			senao
-				classificacao <- lado1
-			fim_se
-		fim_se
-
-		{ escrita da classificação }
-		escreva(classificacao)
-	fim_se
+	{ saída da mensagem na tela }
+	escreva(nome, " tem ", idade, " anos.")
 
 fim_algoritmo
 

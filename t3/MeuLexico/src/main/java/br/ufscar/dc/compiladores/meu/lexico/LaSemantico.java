@@ -1,4 +1,5 @@
 package br.ufscar.dc.compiladores.meu.lexico;
+import static br.ufscar.dc.compiladores.meu.lexico.SimbolosTabela.TipoDadoLA.*;
 
 import org.antlr.v4.runtime.tree.TerminalNode;
 
@@ -119,22 +120,22 @@ public Object visitCmdChamada(MeuParser.CmdChamadaContext ctx) {
 
 @Override
 public Object visitDeclaracao_variavel(MeuParser.Declaracao_variavelContext ctx) {
+    // obtém a tabela de símbolos do escopo atual
     SimbolosTabela tabelaAtual = contexto.obterContextoAtual();
 
-    // para cada identificador na declaração
+    // para cada variável na declaração
     for (MeuParser.IdentificadorContext idCtx : ctx.variavel().identificador()) {
         String nomeVar = idCtx.getText();
 
-        // 1) checar redeclaração no mesmo escopo
         if (tabelaAtual.contem(nomeVar)) {
             LaSemanticoUtils.adicionarErroSemantico(
                 idCtx.start,
-                "identificador " + nomeVar + " já declarado anteriormente"
+                "identificador " + nomeVar + " ja declarado anteriormente"
             );
             continue;
         }
 
-        // 2) determinar o texto do tipo
+        // 2) tenta mapear o tipo textual para um TipoDadoLA
         String tipoStr = ctx.variavel().tipo().getText();
         SimbolosTabela.TipoDadoLA tipoVar = null;
         boolean tipoValido = false;
@@ -151,7 +152,7 @@ public Object visitDeclaracao_variavel(MeuParser.Declaracao_variavelContext ctx)
                 tipoVar = SimbolosTabela.TipoDadoLA.LOGICO;  tipoValido = true; break;
         }
 
-        // 2b) se não for básico, checar se é um tipo definido pelo usuário
+        // 2b) tipos definidos pelo usuário (identificadores previamente declarados)
         if (!tipoValido) {
             for (SimbolosTabela esc : contexto.listarContextosAninhados()) {
                 if (esc.contem(tipoStr)) {
@@ -162,99 +163,98 @@ public Object visitDeclaracao_variavel(MeuParser.Declaracao_variavelContext ctx)
             }
         }
 
-        // 2c) erro se tipo não encontrado
-        if (!tipoValido) {
-            LaSemanticoUtils.adicionarErroSemantico(
-                ctx.variavel().tipo().start,
-                "tipo " + tipoStr + " nao declarado"
-            );
-            // não insere variável de tipo inválido
-            continue;
-        }
+       // 2c) se tipo não for válido, reporta erro e insere como INVALIDO
+if (!tipoValido) {
+    LaSemanticoUtils.adicionarErroSemantico(
+        ctx.variavel().tipo().start,
+        "tipo " + tipoStr + " nao declarado"
+    );
+    // agora inserimos mesmo assim, para não gerar “não declarado” em usos posteriores
+    tabelaAtual.inserir(nomeVar, SimbolosTabela.TipoDadoLA.INVALIDO);
+    continue;
+}
 
-        // 3) inserir no escopo
+
+        // 3) insere a variável com tipo válido na tabela
         tabelaAtual.inserir(nomeVar, tipoVar);
     }
 
-    // prossegue a visita normal
+    // segue a visita normal (para capturar subnós, se necessário)
     return super.visitDeclaracao_variavel(ctx);
 }
 
     
 
-    @Override
-    public Object visitTipo_basico_ident(MeuParser.Tipo_basico_identContext ctx) {
-        // Confirma se tipo está definido em algum escopo
-        
-        if (ctx.IDENT() != null) {
-            boolean tipoDefinido = false;
-            for (SimbolosTabela esc : contexto.listarContextosAninhados()) {
-                if (esc.contem(ctx.IDENT().getText())) {
-                    tipoDefinido = true;
-                    break;
-                }
-            }
-            if (!tipoDefinido) {
-                LaSemanticoUtils.adicionarErroSemantico(ctx.start,
-                        "tipo " + ctx.IDENT().getText() + " não declarado");
-            }
-        }
-        return super.visitTipo_basico_ident(ctx);
-    }
+
 
     @Override
     public Object visitIdentificador(MeuParser.IdentificadorContext ctx) {
-        // Verifica se identificador existe em algum escopo
-        boolean identificadorDeclarado = false;
+        String nomeBase = ctx.IDENT(0).getText();
+        boolean achou = false;
         for (SimbolosTabela esc : contexto.listarContextosAninhados()) {
-            if (esc.contem(ctx.IDENT(0).getText())) {
-                identificadorDeclarado = true;
+            if (esc.contem(nomeBase)) {
+                achou = true;
                 break;
             }
         }
-        if (!identificadorDeclarado) {
-            LaSemanticoUtils.adicionarErroSemantico(ctx.start,
-                    "identificador " + ctx.IDENT(0).getText() + " não declarado");
+        if (!achou) {
+            LaSemanticoUtils.adicionarErroSemantico(
+                ctx.start,
+                "identificador " + nomeBase + " nao declarado"
+            );
+            return SimbolosTabela.TipoDadoLA.INVALIDO;
         }
         return super.visitIdentificador(ctx);
     }
+    
+    
 
 
     @Override
     public Object visitCmdAtribuicao(MeuParser.CmdAtribuicaoContext ctx) {
-        String nome = ctx.identificador().getText();
-        // 1) tipo da variável à esquerda
-        SimbolosTabela.TipoDadoLA tipoVar = LaSemanticoUtils.determinarTipo(contexto, ctx.identificador());
-        // 2) tipo da expressão à direita
+        // 1) obtém os tipos da variável e da expressão
+        SimbolosTabela.TipoDadoLA tipoVar  = LaSemanticoUtils.determinarTipo(contexto, ctx.identificador());
         SimbolosTabela.TipoDadoLA tipoExpr = LaSemanticoUtils.determinarTipo(contexto, ctx.expressao());
-        boolean compatível = false;
-        // num ← num
-        if ((tipoVar == INTEIRO || tipoVar == REAL)
-          && (tipoExpr == INTEIRO || tipoExpr == REAL)) {
-            compatível = true;
+    
+        // 2) se qualquer um for inválido, há erro anterior (tipo não declarado ou id não declarado)
+        //    então pulamos a checagem de compatibilidade para evitar falsos positivos
+        if (tipoVar == SimbolosTabela.TipoDadoLA.INVALIDO
+         || tipoExpr == SimbolosTabela.TipoDadoLA.INVALIDO) {
+            return super.visitCmdAtribuicao(ctx);
         }
-        // lit ← lit
-        else if (tipoVar == CADEIA && tipoExpr == CADEIA) {
-            compatível = true;
+    
+        // 3) checa compatibilidade: num←num, lit←lit, log←log
+        boolean compat = false;
+        // inteiro ou real
+        if ((tipoVar == SimbolosTabela.TipoDadoLA.INTEIRO  || tipoVar == SimbolosTabela.TipoDadoLA.REAL)
+         && (tipoExpr== SimbolosTabela.TipoDadoLA.INTEIRO  || tipoExpr== SimbolosTabela.TipoDadoLA.REAL)) {
+            compat = true;
         }
-        // log ← log
-        else if (tipoVar == LOGICO && tipoExpr == LOGICO) {
-            compatível = true;
+        // literal ← literal
+        else if (tipoVar == SimbolosTabela.TipoDadoLA.CADEIA 
+              && tipoExpr== SimbolosTabela.TipoDadoLA.CADEIA) {
+            compat = true;
         }
-        // (registro) ← (registro) — *se* você tratar de registro
-        else if (tipoVar == SimbolosTabela.TipoDadoLA.TIPO 
-              && tipoExpr == SimbolosTabela.TipoDadoLA.TIPO) {
-            // aqui precisaria comparar o “nome” do tipo para garantir que é o mesmo
-            compatível = true; 
+        // lógico ← lógico
+        else if (tipoVar == SimbolosTabela.TipoDadoLA.LOGICO 
+              && tipoExpr== SimbolosTabela.TipoDadoLA.LOGICO) {
+            compat = true;
         }
-        // (ponteiro ← endereço) — *se* você tratar ponteiro
-        if (!compatível) {
-            LaSemanticoUtils.adicionarErroSemantico(ctx.identificador().start,
-                "atribuição não compatível para " + nome);
+        // aqui, você pode adicionar ponteiros e registros, se quiser
+    
+        // 4) se não for compatível, registra erro
+        if (!compat) {
+            LaSemanticoUtils.adicionarErroSemantico(
+                ctx.identificador().start,
+                "atribuicao nao compativel para " + ctx.identificador().getText()
+            );
         }
+    
         return super.visitCmdAtribuicao(ctx);
     }
     
+
+
     
     }
     
